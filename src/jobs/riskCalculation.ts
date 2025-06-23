@@ -1,1 +1,0 @@
-//riskCalculation.ts vacio

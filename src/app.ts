@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { connectDB } from './config/database';
 import { config } from './config/environment';
-import { setupSwagger } from './config/swagger';
+// ❌ ELIMINAR: import { setupSwagger } from './config/swagger';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { generalRateLimit } from './middleware/rateLimit';
 import routes from './routes';
@@ -63,10 +63,11 @@ if (config.NODE_ENV !== 'test') {
   }));
 }
 
+// ❌ ELIMINAR ESTAS LÍNEAS:
 // Swagger documentation
-if (config.NODE_ENV === 'development') {
-  setupSwagger(app);
-}
+// if (config.NODE_ENV === 'development') {
+//   setupSwagger(app);
+// }
 
 // Routes
 app.use('/api/v1', routes);
@@ -77,16 +78,18 @@ app.get('/', (req, res) => {
     message: 'SIGRISK-EC Backend API',
     version: '1.0.0',
     description: 'Sistema de Análisis y Gestión de Riesgos basado en MAGERIT v3.0',
-    documentation: config.NODE_ENV === 'development' 
-      ? `http://localhost:${config.PORT}/api/docs`
-      : '/api/docs',
+    // ❌ ELIMINAR: documentation: config.NODE_ENV === 'development' 
+    //   ? `http://localhost:${config.PORT}/api/docs`
+    //   : '/api/docs',
     endpoints: {
       health: '/api/v1/health',
       auth: '/api/v1/auth',
       assets: '/api/v1/assets',
       risks: '/api/v1/risks',
       cve: '/api/v1/cve',
-      safeguards: '/api/v1/safeguards'
+      safeguards: '/api/v1/safeguards',
+      threats: '/api/v1/threats',
+      vulnerabilities: '/api/v1/vulnerabilities'
     }
   });
 });
@@ -116,9 +119,6 @@ if (require.main === module) {
     logger.info(`🚀 Servidor corriendo en puerto ${PORT}`);
     logger.info(`📝 Entorno: ${config.NODE_ENV}`);
     logger.info(`🔗 API disponible en: http://localhost:${PORT}/api/v1`);
-    if (config.NODE_ENV === 'development') {
-      logger.info(`📚 Documentación Swagger: http://localhost:${PORT}/api/docs`);
-    }
     logger.info(`🛡️  SIGRISK-EC Backend iniciado correctamente`);
   });
 }

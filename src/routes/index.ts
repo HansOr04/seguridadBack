@@ -4,6 +4,8 @@ import riskRoutes from './risks';
 import authRoutes from './auth';
 import cveRoutes from './cve';
 import safeguardRoutes from './safeguards';
+import threatRoutes from './threats'; // AGREGADO
+import vulnerabilityRoutes from './vulnerabilities'; // AGREGADO
 
 const router = Router();
 
@@ -13,6 +15,8 @@ router.use('/assets', assetRoutes);
 router.use('/risks', riskRoutes);
 router.use('/cve', cveRoutes);
 router.use('/safeguards', safeguardRoutes);
+router.use('/threats', threatRoutes); // AGREGADO
+router.use('/vulnerabilities', vulnerabilityRoutes); // AGREGADO
 
 // Health check
 router.get('/health', (req, res) => {
@@ -26,7 +30,9 @@ router.get('/health', (req, res) => {
       assets: 'Gestión de activos MAGERIT',
       risks: 'Análisis cuantitativo de riesgos',
       cve: 'Integración con CVE/NVD',
-      safeguards: 'Gestión de salvaguardas'
+      safeguards: 'Gestión de salvaguardas',
+      threats: 'Gestión de amenazas', // AGREGADO
+      vulnerabilities: 'Gestión de vulnerabilidades' // AGREGADO
     }
   });
 });

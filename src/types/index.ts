@@ -150,8 +150,28 @@ export interface ISafeguard extends Document {
   costeMantenenimiento: number;
   protege: Types.ObjectId[];
   activos: Types.ObjectId[];
+  responsable: string; // AGREGADO
+  periodicidadRevision: number; // AGREGADO
+  documentacion: Array<{
+    nombre: string;
+    url?: string;
+    descripcion?: string;
+  }>; // AGREGADO
+  kpis: Array<{
+    nombre: string;
+    valor: number;
+    unidad: string;
+    fechaMedicion: Date;
+  }>; // AGREGADO
   fechaImplementacion?: Date;
   fechaRevision?: Date;
+  fechaCreacion: Date;
+  fechaActualizacion: Date; // AGREGADO
+  
+  // Métodos de instancia
+  calcularEfectividadReal(): number;
+  programarRevision(meses?: number): void;
+  agregarKPI(nombre: string, valor: number, unidad: string): void;
 }
 
 export interface IUser extends Document {

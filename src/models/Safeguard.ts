@@ -1,4 +1,4 @@
-import mongoose, { Schema } from 'mongoose';
+import mongoose, { Schema, Model } from 'mongoose';
 import { ISafeguard, EstadoSalvaguarda } from '../types';
 
 // Schema para documentación
@@ -15,6 +15,13 @@ const kpisSchema = new Schema({
   unidad: { type: String, required: true },
   fechaMedicion: { type: Date, default: Date.now }
 }, { _id: false });
+
+// Interface para métodos estáticos
+interface ISafeguardModel extends Model<ISafeguard> {
+  findByEstado(estado: EstadoSalvaguarda): Promise<ISafeguard[]>;
+  findVencidas(): Promise<ISafeguard[]>;
+  findProximasRevision(dias?: number): Promise<ISafeguard[]>;
+}
 
 const safeguardSchema = new Schema<ISafeguard>({
   codigo: {
@@ -155,11 +162,11 @@ safeguardSchema.pre('save', function(next) {
 });
 
 // Virtuals
-safeguardSchema.virtual('costeTotalAnual').get(function() {
+safeguardSchema.virtual('costeTotalAnual').get(function(this: ISafeguard) {
   return this.costo + (this.costeMantenenimiento * 12);
 });
 
-safeguardSchema.virtual('roi').get(function() {
+safeguardSchema.virtual('roi').get(function(this: ISafeguard) {
   // ROI = (Reducción de riesgo * Valor activos) / Costo total
   if (this.costo === 0) return 0;
   
@@ -172,7 +179,7 @@ safeguardSchema.virtual('roi').get(function() {
   return ((reduccionRiesgo * valorPromedio) / costoTotal) * 100;
 });
 
-safeguardSchema.virtual('nivelEficacia').get(function() {
+safeguardSchema.virtual('nivelEficacia').get(function(this: ISafeguard) {
   if (this.eficacia >= 90) return 'Muy Alta';
   if (this.eficacia >= 70) return 'Alta';
   if (this.eficacia >= 50) return 'Media';
@@ -180,7 +187,7 @@ safeguardSchema.virtual('nivelEficacia').get(function() {
   return 'Muy Baja';
 });
 
-safeguardSchema.virtual('estadoRevision').get(function() {
+safeguardSchema.virtual('estadoRevision').get(function(this: ISafeguard) {
   if (!this.fechaRevision) return 'Sin programar';
   
   const ahora = new Date();
@@ -194,7 +201,7 @@ safeguardSchema.virtual('estadoRevision').get(function() {
   return 'Programada';
 });
 
-safeguardSchema.virtual('diasImplementacion').get(function() {
+safeguardSchema.virtual('diasImplementacion').get(function(this: ISafeguard) {
   if (!this.fechaImplementacion) return null;
   
   const ahora = new Date();
@@ -203,7 +210,7 @@ safeguardSchema.virtual('diasImplementacion').get(function() {
   return Math.floor((ahora.getTime() - fechaImplementacion.getTime()) / (1000 * 60 * 60 * 24));
 });
 
-// Métodos estáticos
+// Métodos estáticos - CORREGIDOS
 safeguardSchema.static('findByEstado', function(estado: EstadoSalvaguarda) {
   return this.find({ estado }).populate('activos protege');
 });
@@ -228,11 +235,11 @@ safeguardSchema.static('findProximasRevision', function(dias: number = 30) {
 });
 
 // Métodos de instancia
-safeguardSchema.method('calcularEfectividadReal', function() {
+safeguardSchema.method('calcularEfectividadReal', function(this: ISafeguard) {
   // Calcular efectividad basada en KPIs y tiempo de implementación
   if (this.kpis.length === 0) return this.eficacia;
   
-  const kpisRecientes = this.kpis.filter((kpi: any) => {
+  const kpisRecientes = this.kpis.filter((kpi) => {
     const hace30Dias = new Date();
     hace30Dias.setDate(hace30Dias.getDate() - 30);
     return kpi.fechaMedicion >= hace30Dias;
@@ -241,13 +248,13 @@ safeguardSchema.method('calcularEfectividadReal', function() {
   if (kpisRecientes.length === 0) return this.eficacia;
   
   // Promedio de KPIs recientes como factor de ajuste
-  const promedioKpis = kpisRecientes.reduce((sum: number, kpi: any) => sum + kpi.valor, 0) / kpisRecientes.length;
+  const promedioKpis = kpisRecientes.reduce((sum, kpi) => sum + kpi.valor, 0) / kpisRecientes.length;
   
   // Ajustar eficacia base con datos reales
   return Math.min(100, this.eficacia * (promedioKpis / 100));
 });
 
-safeguardSchema.method('programarRevision', function(meses?: number) {
+safeguardSchema.method('programarRevision', function(this: ISafeguard, meses?: number) {
   if (this.fechaImplementacion) {
     const periodicidad = meses || this.periodicidadRevision;
     const fechaRevision = new Date(this.fechaImplementacion);
@@ -256,7 +263,7 @@ safeguardSchema.method('programarRevision', function(meses?: number) {
   }
 });
 
-safeguardSchema.method('agregarKPI', function(nombre: string, valor: number, unidad: string) {
+safeguardSchema.method('agregarKPI', function(this: ISafeguard, nombre: string, valor: number, unidad: string) {
   this.kpis.push({
     nombre,
     valor,
@@ -276,4 +283,4 @@ safeguardSchema.set('toJSON', {
 
 safeguardSchema.set('toObject', { virtuals: true });
 
-export const Safeguard = mongoose.model<ISafeguard>('Safeguard', safeguardSchema);
+export const Safeguard = mongoose.model<ISafeguard, ISafeguardModel>('Safeguard', safeguardSchema);
