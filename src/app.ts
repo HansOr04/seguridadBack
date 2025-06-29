@@ -4,7 +4,6 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { connectDB } from './config/database';
 import { config } from './config/environment';
-// ❌ ELIMINAR: import { setupSwagger } from './config/swagger';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { generalRateLimit } from './middleware/rateLimit';
 import routes from './routes';
@@ -15,6 +14,9 @@ import { cveSyncJob } from './jobs/cveSync';
 
 // Crear aplicación Express
 const app = express();
+
+// Variables para tracking del servidor
+const startTime = Date.now();
 
 // Conectar a MongoDB
 connectDB();
@@ -63,11 +65,61 @@ if (config.NODE_ENV !== 'test') {
   }));
 }
 
-// ❌ ELIMINAR ESTAS LÍNEAS:
-// Swagger documentation
-// if (config.NODE_ENV === 'development') {
-//   setupSwagger(app);
-// }
+// Health Check Endpoint - AGREGADO
+app.get('/api/v1/health', (req, res) => {
+  const uptime = Date.now() - startTime;
+  
+  const formatUptime = (ms: number): string => {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+    return `${seconds}s`;
+  };
+
+  // Información de memoria
+  const memoryUsage = process.memoryUsage();
+  
+  try {
+    res.json({
+      status: 'success',
+      data: {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: formatUptime(uptime),
+        version: process.env.npm_package_version || '1.0.0',
+        environment: config.NODE_ENV || 'development',
+        node_version: process.version,
+        database: 'connected', // TODO: Verificar conexión real a MongoDB
+        memory: {
+          used: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+          total: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+          rss: Math.round(memoryUsage.rss / 1024 / 1024)
+        },
+        system: {
+          platform: process.platform,
+          arch: process.arch,
+          cpu_count: require('os').cpus().length,
+          load_avg: require('os').loadavg()
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Error en health check:', error);
+    res.status(500).json({
+      status: 'error',
+      data: {
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        error: 'Internal server error during health check'
+      }
+    });
+  }
+});
 
 // Routes
 app.use('/api/v1', routes);
@@ -78,9 +130,6 @@ app.get('/', (req, res) => {
     message: 'SIGRISK-EC Backend API',
     version: '1.0.0',
     description: 'Sistema de Análisis y Gestión de Riesgos basado en MAGERIT v3.0',
-    // ❌ ELIMINAR: documentation: config.NODE_ENV === 'development' 
-    //   ? `http://localhost:${config.PORT}/api/docs`
-    //   : '/api/docs',
     endpoints: {
       health: '/api/v1/health',
       auth: '/api/v1/auth',
@@ -119,6 +168,7 @@ if (require.main === module) {
     logger.info(`🚀 Servidor corriendo en puerto ${PORT}`);
     logger.info(`📝 Entorno: ${config.NODE_ENV}`);
     logger.info(`🔗 API disponible en: http://localhost:${PORT}/api/v1`);
+    logger.info(`💚 Health check: http://localhost:${PORT}/api/v1/health`);
     logger.info(`🛡️  SIGRISK-EC Backend iniciado correctamente`);
   });
 }
