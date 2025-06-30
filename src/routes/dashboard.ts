@@ -52,5 +52,15 @@ router.get('/health',
   authorize(RolUsuario.ADMIN, RolUsuario.AUDITOR),
   dashboardController.getDashboardHealth.bind(dashboardController)
 );
+router.get('/matrix', 
+  cacheMiddleware(CACHE_TTL.risk_matrix), 
+  dashboardController.getRiskMatrix.bind(dashboardController)
+);
+
+// GET /api/v1/dashboard/risk-matrix - Alias para compatibilidad
+router.get('/risk-matrix', 
+  cacheMiddleware(CACHE_TTL.risk_matrix), 
+  dashboardController.getRiskMatrix.bind(dashboardController)
+);
 
 export default router;

@@ -45,6 +45,19 @@ export class SafeguardController {
       next(error);
     }
   }
+  async getSafeguardStats(req: Request, res: Response<ApiResponse>, next: NextFunction) {
+  try {
+    const stats = await safeguardService.getSafeguardStats();
+    
+    res.json({
+      success: true,
+      data: stats,
+      message: 'Estadísticas de salvaguardas obtenidas exitosamente'
+    });
+  } catch (error) {
+    next(error);
+  }
+}
 
   // POST /api/v1/safeguards
   async createSafeguard(req: Request, res: Response<ApiResponse>, next: NextFunction) {

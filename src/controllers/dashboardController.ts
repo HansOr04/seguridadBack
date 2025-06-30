@@ -4,6 +4,7 @@ import { dashboardService } from '../services/DashboardService';
 import { ApiResponse } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import logger from '../utils/logger';
+import { riskService } from '../services/RiskService';
 
 export class DashboardController {
   
@@ -601,6 +602,57 @@ export class DashboardController {
 
     return recommendations;
   }
+  async getRiskMatrix(req: Request, res: Response<ApiResponse>, next: NextFunction) {
+  const startTime = Date.now();
+  
+  try {
+    logger.info('🎯 Obteniendo matriz de riesgos para dashboard');
+
+    // Obtener matriz de riesgos usando el servicio existente
+    const matrixData = await riskService.getRiskMatrix();
+    
+    // Transformar datos para el formato del dashboard
+    const dashboardMatrix = {
+      matrix: matrixData.matrix,
+      stats: matrixData.stats,
+      
+      // Datos adicionales para visualización del dashboard
+      distribution: {
+        criticos: matrixData.matrix.criticos.length,
+        altos: matrixData.matrix.altos.length,
+        medios: matrixData.matrix.medios.length,
+        bajos: matrixData.matrix.bajos.length,
+        muyBajos: matrixData.matrix.muyBajos.length
+      },
+      
+      // Top 5 riesgos para widget del dashboard
+      topRisks: [
+        ...matrixData.matrix.criticos.slice(0, 3),
+        ...matrixData.matrix.altos.slice(0, 2)
+      ].slice(0, 5),
+      
+      meta: {
+        timestamp: new Date().toISOString(),
+        responseTime: Date.now() - startTime,
+        totalRisks: matrixData.stats.totalRiesgos
+      }
+    };
+
+    const duration = Date.now() - startTime;
+    logger.info(`✅ Matriz de riesgos obtenida en ${duration}ms`);
+    
+    res.json({
+      success: true,
+      data: dashboardMatrix,
+      message: 'Matriz de riesgos para dashboard obtenida exitosamente'
+    });
+    
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error(`❌ Error obteniendo matriz de riesgos (${duration}ms):`, error);
+    next(error);
+  }
+}
 }
 
 export const dashboardController = new DashboardController();

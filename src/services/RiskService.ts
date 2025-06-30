@@ -7,6 +7,10 @@ import { AppError } from '../middleware/errorHandler';
 import logger from '../utils/logger';
 
 export class RiskService {
+  // ===========================
+  // MÉTODOS EXISTENTES (mantener todos)
+  // ===========================
+
   // Calcular riesgo individual
   async calculateRisk(
     assetId: string, 
@@ -297,6 +301,461 @@ export class RiskService {
       };
     } catch (error) {
       logger.error('Error obteniendo KPIs del dashboard:', error);
+      throw error;
+    }
+  }
+
+  // ===========================
+  // MÉTODOS NUEVOS FALTANTES
+  // ===========================
+
+  // ✅ MÉTODO FALTANTE: getRisks con filtros y paginación
+  async getRisks(options: {
+    page?: number;
+    limit?: number;
+    sort?: string;
+    filter?: {
+      nivel?: string;
+      estado?: string;
+      activo?: string;
+      amenaza?: string;
+      valorMinimo?: number;
+      valorMaximo?: number;
+      search?: string;
+    };
+  }): Promise<{
+    risks: IRisk[];
+    pagination: any;
+  }> {
+    try {
+      const { page = 1, limit = 10, sort = '-fechaCalculo', filter = {} } = options;
+      const skip = (page - 1) * limit;
+
+      // Construir query de MongoDB
+      const query: any = { vigente: true };
+
+      // Filtros específicos
+      if (filter.nivel) query.nivelRiesgo = filter.nivel;
+      if (filter.activo) query.activo = filter.activo;
+      if (filter.amenaza) query.amenaza = filter.amenaza;
+      
+      if (filter.valorMinimo !== undefined || filter.valorMaximo !== undefined) {
+        query.valorRiesgo = {};
+        if (filter.valorMinimo !== undefined) query.valorRiesgo.$gte = filter.valorMinimo;
+        if (filter.valorMaximo !== undefined) query.valorRiesgo.$lte = filter.valorMaximo;
+      }
+
+      // Para búsqueda general, necesitamos usar agregación para buscar en campos populados
+      let risks: IRisk[];
+      let total: number;
+
+      if (filter.search) {
+        // Usar agregación para búsqueda en campos relacionados
+        const aggregationPipeline = [
+          { $match: { vigente: true } },
+          {
+            $lookup: {
+              from: 'assets',
+              localField: 'activo',
+              foreignField: '_id',
+              as: 'activoData'
+            }
+          },
+          {
+            $lookup: {
+              from: 'threats',
+              localField: 'amenaza',
+              foreignField: '_id',
+              as: 'amenazaData'
+            }
+          },
+          {
+            $lookup: {
+              from: 'vulnerabilities',
+              localField: 'vulnerabilidad',
+              foreignField: '_id',
+              as: 'vulnerabilidadData'
+            }
+          },
+          {
+            $match: {
+              $or: [
+                { nivelRiesgo: new RegExp(filter.search, 'i') },
+                { 'activoData.nombre': new RegExp(filter.search, 'i') },
+                { 'activoData.codigo': new RegExp(filter.search, 'i') },
+                { 'amenazaData.nombre': new RegExp(filter.search, 'i') },
+                { 'amenazaData.codigo': new RegExp(filter.search, 'i') },
+                { 'vulnerabilidadData.nombre': new RegExp(filter.search, 'i') }
+              ]
+            }
+          }
+        ];
+
+        // Obtener total con búsqueda
+        const totalPipeline = [...aggregationPipeline, { $count: 'total' }];
+        const totalResult = await Risk.aggregate(totalPipeline);
+        total = totalResult[0]?.total || 0;
+
+        // Obtener datos con paginación
+        const dataPipeline = [
+          ...aggregationPipeline,
+          { $sort: this.parseSortString(sort) },
+          { $skip: skip },
+          { $limit: limit },
+          {
+            $project: {
+              activo: { $arrayElemAt: ['$activoData', 0] },
+              amenaza: { $arrayElemAt: ['$amenazaData', 0] },
+              vulnerabilidad: { $arrayElemAt: ['$vulnerabilidadData', 0] },
+              calculos: 1,
+              valorRiesgo: 1,
+              nivelRiesgo: 1,
+              probabilidad: 1,
+              impacto: 1,
+              fechaCalculo: 1,
+              vigente: 1
+            }
+          }
+        ];
+
+        risks = await Risk.aggregate(dataPipeline);
+      } else {
+        // Sin búsqueda, usar find normal
+        [risks, total] = await Promise.all([
+          Risk.find(query)
+            .populate('activo', 'codigo nombre tipo valorEconomico')
+            .populate('amenaza', 'codigo nombre tipo probabilidad')
+            .populate('vulnerabilidad', 'codigo nombre categoria')
+            .sort(sort)
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+          Risk.countDocuments(query)
+        ]);
+      }
+
+      return {
+        risks: risks as IRisk[],
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+          hasNextPage: page < Math.ceil(total / limit),
+          hasPrevPage: page > 1
+        }
+      };
+    } catch (error) {
+      logger.error('Error obteniendo riesgos:', error);
+      throw error;
+    }
+  }
+
+  // Helper para parsear string de ordenamiento
+  private parseSortString(sort: string): any {
+    const sortObj: any = {};
+    if (sort.startsWith('-')) {
+      sortObj[sort.slice(1)] = -1;
+    } else {
+      sortObj[sort] = 1;
+    }
+    return sortObj;
+  }
+
+  // ✅ MÉTODO FALTANTE: getRiskStats - Estadísticas detalladas
+  async getRiskStats(): Promise<{
+    general: {
+      totalRiesgos: number;
+      riesgosCriticos: number;
+      riesgosAltos: number;
+      riesgosMedios: number;
+      riesgosBajos: number;
+      riesgosMuyBajos: number;
+      valorTotalEnRiesgo: number;
+      riesgoPromedio: number;
+    };
+    distribucion: {
+      porNivel: Array<{ _id: string; count: number; valorTotal: number }>;
+      porActivo: Array<{ _id: string; nombre: string; count: number; valorTotal: number }>;
+      porAmenaza: Array<{ _id: string; nombre: string; count: number }>;
+    };
+    tendencias: {
+      ultimasSemanas: Array<{ semana: string; nuevos: number; modificados: number }>;
+      evolucionNiveles: Array<{ fecha: string; criticos: number; altos: number }>;
+    };
+    metricas: {
+      tiempoPromedioResolucion: number;
+      porcentajeConSalvaguardas: number;
+      efectividadPromedio: number;
+    };
+  }> {
+    try {
+      // Estadísticas generales
+      const generalStats = await Risk.aggregate([
+        { $match: { vigente: true } },
+        {
+          $group: {
+            _id: null,
+            totalRiesgos: { $sum: 1 },
+            valorTotalEnRiesgo: { $sum: '$valorRiesgo' },
+            riesgoPromedio: { $avg: { $multiply: ['$probabilidad', '$impacto'] } },
+            riesgosCriticos: { $sum: { $cond: [{ $eq: ['$nivelRiesgo', 'Crítico'] }, 1, 0] } },
+            riesgosAltos: { $sum: { $cond: [{ $eq: ['$nivelRiesgo', 'Alto'] }, 1, 0] } },
+            riesgosMedios: { $sum: { $cond: [{ $eq: ['$nivelRiesgo', 'Medio'] }, 1, 0] } },
+            riesgosBajos: { $sum: { $cond: [{ $eq: ['$nivelRiesgo', 'Bajo'] }, 1, 0] } },
+            riesgosMuyBajos: { $sum: { $cond: [{ $eq: ['$nivelRiesgo', 'Muy Bajo'] }, 1, 0] } }
+          }
+        }
+      ]);
+
+      // Distribución por nivel con valores
+      const distribucionNivel = await Risk.aggregate([
+        { $match: { vigente: true } },
+        {
+          $group: {
+            _id: '$nivelRiesgo',
+            count: { $sum: 1 },
+            valorTotal: { $sum: '$valorRiesgo' }
+          }
+        },
+        { $sort: { valorTotal: -1 } }
+      ]);
+
+      // Top activos con más riesgos
+      const distribucionActivo = await Risk.aggregate([
+        { $match: { vigente: true } },
+        {
+          $lookup: {
+            from: 'assets',
+            localField: 'activo',
+            foreignField: '_id',
+            as: 'activoData'
+          }
+        },
+        { $unwind: '$activoData' },
+        {
+          $group: {
+            _id: '$activo',
+            nombre: { $first: '$activoData.nombre' },
+            count: { $sum: 1 },
+            valorTotal: { $sum: '$valorRiesgo' }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]);
+
+      // Top amenazas
+      const distribucionAmenaza = await Risk.aggregate([
+        { $match: { vigente: true } },
+        {
+          $lookup: {
+            from: 'threats',
+            localField: 'amenaza',
+            foreignField: '_id',
+            as: 'amenazaData'
+          }
+        },
+        { $unwind: '$amenazaData' },
+        {
+          $group: {
+            _id: '$amenaza',
+            nombre: { $first: '$amenazaData.nombre' },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]);
+
+      // Tendencias últimas 8 semanas
+      const hace8Semanas = new Date();
+      hace8Semanas.setDate(hace8Semanas.getDate() - 56);
+
+      const tendenciasSemanales = await Risk.aggregate([
+        { $match: { fechaCalculo: { $gte: hace8Semanas }, vigente: true } },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: '%Y-W%U', date: '$fechaCalculo' }
+            },
+            nuevos: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id': 1 } },
+        {
+          $project: {
+            semana: '$_id',
+            nuevos: 1,
+            modificados: '$nuevos', // Simplificado
+            _id: 0
+          }
+        }
+      ]);
+
+      const general = generalStats[0] || {
+        totalRiesgos: 0,
+        riesgosCriticos: 0,
+        riesgosAltos: 0,
+        riesgosMedios: 0,
+        riesgosBajos: 0,
+        riesgosMuyBajos: 0,
+        valorTotalEnRiesgo: 0,
+        riesgoPromedio: 0
+      };
+
+      return {
+        general,
+        distribucion: {
+          porNivel: distribucionNivel,
+          porActivo: distribucionActivo,
+          porAmenaza: distribucionAmenaza
+        },
+        tendencias: {
+          ultimasSemanas: tendenciasSemanales,
+          evolucionNiveles: [] // Simplificado por ahora
+        },
+        metricas: {
+          tiempoPromedioResolucion: 0, // TODO: Implementar cuando haya fechas de resolución
+          porcentajeConSalvaguardas: 0, // TODO: Implementar
+          efectividadPromedio: 0 // TODO: Implementar
+        }
+      };
+    } catch (error) {
+      logger.error('Error obteniendo estadísticas de riesgos:', error);
+      throw error;
+    }
+  }
+
+  // ✅ MÉTODO FALTANTE: getRiskById
+  async getRiskById(id: string): Promise<IRisk> {
+    try {
+      const risk = await Risk.findById(id)
+        .populate('activo', 'codigo nombre tipo valoracion valorEconomico')
+        .populate('amenaza', 'codigo nombre tipo probabilidad descripcion')
+        .populate('vulnerabilidad', 'codigo nombre categoria facilidadExplotacion')
+        .lean();
+
+      if (!risk) {
+        throw new AppError('Riesgo no encontrado', 404);
+      }
+
+      return risk as IRisk;
+    } catch (error) {
+      logger.error(`Error obteniendo riesgo ${id}:`, error);
+      throw error;
+    }
+  }
+
+  // ✅ MÉTODO FALTANTE: createRisk
+  async createRisk(riskData: {
+    activo: string;
+    amenaza: string;
+    vulnerabilidad?: string;
+    probabilidad?: number;
+    impacto?: number;
+  }): Promise<IRisk> {
+    try {
+      // Si no se proporcionan probabilidad/impacto, calcular automáticamente
+      if (!riskData.probabilidad || !riskData.impacto) {
+        const calculatedRisk = await this.createOrUpdateRisk(
+          riskData.activo,
+          riskData.amenaza,
+          riskData.vulnerabilidad
+        );
+        return calculatedRisk;
+      }
+
+      // Crear riesgo manual
+      const calculos = await this.calculateRisk(
+        riskData.activo,
+        riskData.amenaza,
+        riskData.vulnerabilidad
+      );
+
+      const riesgoFinal = riskData.probabilidad * riskData.impacto;
+      const nivelRiesgo = this.determineRiskLevel(riesgoFinal);
+
+      const newRisk = new Risk({
+        activo: riskData.activo,
+        amenaza: riskData.amenaza,
+        vulnerabilidad: riskData.vulnerabilidad || null,
+        calculos,
+        valorRiesgo: riesgoFinal,
+        nivelRiesgo,
+        probabilidad: riskData.probabilidad,
+        impacto: riskData.impacto,
+        fechaCalculo: new Date(),
+        vigente: true
+      });
+
+      await newRisk.save();
+      await newRisk.populate('activo amenaza vulnerabilidad');
+
+      logger.info(`Riesgo creado: ${newRisk._id}`);
+      return newRisk;
+    } catch (error) {
+      logger.error('Error creando riesgo:', error);
+      throw error;
+    }
+  }
+
+  // ✅ MÉTODO FALTANTE: updateRisk
+  async updateRisk(id: string, updateData: Partial<IRisk>): Promise<IRisk> {
+    try {
+      // Si se actualizan probabilidad o impacto, recalcular
+      if (updateData.probabilidad !== undefined || updateData.impacto !== undefined) {
+        const currentRisk = await Risk.findById(id);
+        if (!currentRisk) {
+          throw new AppError('Riesgo no encontrado', 404);
+        }
+
+        const newProbabilidad = updateData.probabilidad ?? currentRisk.probabilidad;
+        const newImpacto = updateData.impacto ?? currentRisk.impacto;
+        const newValorRiesgo = newProbabilidad * newImpacto;
+        const newNivelRiesgo = this.determineRiskLevel(newValorRiesgo);
+
+        updateData.valorRiesgo = newValorRiesgo;
+        updateData.nivelRiesgo = newNivelRiesgo;
+        updateData.fechaCalculo = new Date();
+      }
+
+      const risk = await Risk.findByIdAndUpdate(
+        id,
+        updateData,
+        { new: true, runValidators: true }
+      ).populate('activo amenaza vulnerabilidad');
+
+      if (!risk) {
+        throw new AppError('Riesgo no encontrado', 404);
+      }
+
+      logger.info(`Riesgo actualizado: ${risk._id}`);
+      return risk;
+    } catch (error) {
+      logger.error(`Error actualizando riesgo ${id}:`, error);
+      throw error;
+    }
+  }
+
+  // ✅ MÉTODO FALTANTE: deleteRisk
+  async deleteRisk(id: string): Promise<void> {
+    try {
+      const risk = await Risk.findById(id);
+      if (!risk) {
+        throw new AppError('Riesgo no encontrado', 404);
+      }
+
+      // Marcar como no vigente en lugar de eliminar físicamente
+      risk.vigente = false;
+      await risk.save();
+
+      // O eliminar físicamente si se prefiere:
+      // await Risk.findByIdAndDelete(id);
+
+      logger.info(`Riesgo eliminado: ${id}`);
+    } catch (error) {
+      logger.error(`Error eliminando riesgo ${id}:`, error);
       throw error;
     }
   }

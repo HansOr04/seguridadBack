@@ -346,6 +346,371 @@ export class SafeguardService {
 
     return recommendations;
   }
+
+  async getSafeguardStats(): Promise<{
+    general: {
+      totalSalvaguardas: number;
+      salvaguardasImplementadas: number;
+      salvaguardasPlanificadas: number;
+      salvaguardasObsoletas: number;
+      efectividadPromedio: number;
+      costoTotalImplementacion: number;
+      costoTotalMantenimiento: number;
+      porcentajeImplementacion: number;
+    };
+    distribucion: {
+      porTipo: Array<{ _id: string; count: number; efectividadPromedio: number }>;
+      porCategoria: Array<{ _id: string; count: number; costoPromedio: number }>;
+      porEstado: Array<{ _id: string; count: number; porcentaje: number }>;
+      porResponsable: Array<{ _id: string; count: number; efectividadPromedio: number }>;
+    };
+    efectividad: {
+      porRangoEficacia: Array<{ rango: string; count: number; porcentaje: number }>;
+      mejoresPerformers: Array<{ 
+        _id: string; 
+        nombre: string; 
+        eficacia: number; 
+        costoEfectividad: number 
+      }>;
+      necesitanMejora: Array<{ 
+        _id: string; 
+        nombre: string; 
+        eficacia: number; 
+        estadoRevision: string 
+      }>;
+    };
+    costos: {
+      totalInversion: number;
+      costoPromedioImplementacion: number;
+      costoPromedioMantenimiento: number;
+      roiPromedio: number;
+      distribuccionCostos: Array<{ categoria: string; costo: number; porcentaje: number }>;
+    };
+    timeline: {
+      implementacionesPorMes: Array<{ mes: string; implementadas: number; planificadas: number }>;
+      revisionesPendientes: Array<{ 
+        _id: string; 
+        nombre: string; 
+        fechaRevision: Date; 
+        diasVencido: number 
+      }>;
+    };
+    metricas: {
+      tiempoPromedioImplementacion: number;
+      tasaExito: number;
+      coberturaAmenazas: number;
+      coberturaActivos: number;
+    };
+  }> {
+    try {
+      // Estadísticas generales
+      const generalStats = await Safeguard.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalSalvaguardas: { $sum: 1 },
+            salvaguardasImplementadas: {
+              $sum: { $cond: [{ $eq: ['$estado', 'Implementada'] }, 1, 0] }
+            },
+            salvaguardasPlanificadas: {
+              $sum: { $cond: [{ $eq: ['$estado', 'Planificada'] }, 1, 0] }
+            },
+            salvaguardasObsoletas: {
+              $sum: { $cond: [{ $eq: ['$estado', 'Obsoleta'] }, 1, 0] }
+            },
+            efectividadPromedio: { $avg: '$eficacia' },
+            costoTotalImplementacion: { $sum: '$costo' },
+            costoTotalMantenimiento: { $sum: '$costeMantenenimiento' }
+          }
+        }
+      ]);
+
+      // Distribución por tipo
+      const distribucionTipo = await Safeguard.aggregate([
+        {
+          $group: {
+            _id: '$tipo',
+            count: { $sum: 1 },
+            efectividadPromedio: { $avg: '$eficacia' }
+          }
+        },
+        { $sort: { count: -1 } }
+      ]);
+
+      // Distribución por categoría
+      const distribucionCategoria = await Safeguard.aggregate([
+        {
+          $group: {
+            _id: '$categoria',
+            count: { $sum: 1 },
+            costoPromedio: { $avg: { $add: ['$costo', { $multiply: ['$costeMantenenimiento', 12] }] } }
+          }
+        },
+        { $sort: { count: -1 } }
+      ]);
+
+      // Distribución por estado
+      const distribucionEstado = await Safeguard.aggregate([
+        {
+          $group: {
+            _id: '$estado',
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      // Calcular porcentajes para distribución por estado
+      const totalSafeguards = distribucionEstado.reduce((sum, item) => sum + item.count, 0);
+      const distribucionEstadoWithPercentage = distribucionEstado.map(item => ({
+        ...item,
+        porcentaje: totalSafeguards > 0 ? Math.round((item.count / totalSafeguards) * 100) : 0
+      }));
+
+      // Distribución por responsable
+      const distribucionResponsable = await Safeguard.aggregate([
+        {
+          $group: {
+            _id: '$responsable',
+            count: { $sum: 1 },
+            efectividadPromedio: { $avg: '$eficacia' }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]);
+
+      // Rangos de eficacia - FIXED VERSION
+      const rangoEficacia = await Safeguard.aggregate([
+        {
+          $addFields: {
+            rangoEficacia: {
+              $switch: {
+                branches: [
+                  { case: { $lt: ['$eficacia', 25] }, then: 'Muy Baja (0-24%)' },
+                  { case: { $lt: ['$eficacia', 50] }, then: 'Baja (25-49%)' },
+                  { case: { $lt: ['$eficacia', 75] }, then: 'Media (50-74%)' },
+                  { case: { $lt: ['$eficacia', 90] }, then: 'Alta (75-89%)' },
+                  { case: { $gte: ['$eficacia', 90] }, then: 'Muy Alta (90-100%)' }
+                ],
+                default: 'Sin clasificar'
+              }
+            }
+          }
+        },
+        {
+          $group: {
+            _id: '$rangoEficacia',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $addFields: {
+            rango: '$_id'
+          }
+        },
+        { $sort: { '_id': 1 } }
+      ]);
+
+      // Calculate total count for percentage calculation
+      const rangoEficaciaTotal = rangoEficacia.reduce((sum, item) => sum + item.count, 0);
+      const rangoEficaciaWithPercentage = rangoEficacia.map(item => ({
+        ...item,
+        porcentaje: rangoEficaciaTotal > 0 ? Math.round((item.count / rangoEficaciaTotal) * 100) : 0
+      }));
+
+      // Mejores performers (Top 5 por eficacia)
+      const mejoresPerformers = await Safeguard.aggregate([
+        { $match: { estado: 'Implementada', eficacia: { $gte: 80 } } },
+        {
+          $addFields: {
+            costoAnual: { $add: ['$costo', { $multiply: ['$costeMantenenimiento', 12] }] },
+            costoEfectividad: {
+              $cond: {
+                if: { $eq: ['$costo', 0] },
+                then: '$eficacia',
+                else: { $divide: ['$eficacia', { $add: ['$costo', { $multiply: ['$costeMantenenimiento', 12] }] }] }
+              }
+            }
+          }
+        },
+        { $sort: { eficacia: -1, costoEfectividad: -1 } },
+        { $limit: 5 },
+        {
+          $project: {
+            nombre: 1,
+            eficacia: 1,
+            costoEfectividad: 1
+          }
+        }
+      ]);
+
+      // Salvaguardas que necesitan mejora (eficacia < 50% o vencidas)
+      const necesitanMejora = await Safeguard.aggregate([
+        {
+          $match: {
+            $or: [
+              { eficacia: { $lt: 50 } },
+              { fechaRevision: { $lt: new Date() } }
+            ]
+          }
+        },
+        {
+          $addFields: {
+            estadoRevision: {
+              $cond: {
+                if: { $lt: ['$fechaRevision', new Date()] },
+                then: 'Revisión vencida',
+                else: 'Eficacia baja'
+              }
+            }
+          }
+        },
+        { $sort: { eficacia: 1 } },
+        { $limit: 10 },
+        {
+          $project: {
+            nombre: 1,
+            eficacia: 1,
+            estadoRevision: 1
+          }
+        }
+      ]);
+
+      // Timeline de implementaciones (últimos 12 meses)
+      const hace12Meses = new Date();
+      hace12Meses.setMonth(hace12Meses.getMonth() - 12);
+
+      const implementacionesPorMes = await Safeguard.aggregate([
+        {
+          $match: {
+            $or: [
+              { fechaImplementacion: { $gte: hace12Meses } },
+              { fechaCreacion: { $gte: hace12Meses } }
+            ]
+          }
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: '%Y-%m', date: '$fechaImplementacion' }
+            },
+            implementadas: {
+              $sum: { $cond: [{ $eq: ['$estado', 'Implementada'] }, 1, 0] }
+            },
+            planificadas: {
+              $sum: { $cond: [{ $eq: ['$estado', 'Planificada'] }, 1, 0] }
+            }
+          }
+        },
+        { $sort: { '_id': 1 } },
+        {
+          $project: {
+            mes: '$_id',
+            implementadas: 1,
+            planificadas: 1,
+            _id: 0
+          }
+        }
+      ]);
+
+      // Revisiones pendientes/vencidas
+      const revisionesPendientes = await Safeguard.aggregate([
+        {
+          $match: {
+            fechaRevision: { $exists: true },
+            estado: 'Implementada'
+          }
+        },
+        {
+          $addFields: {
+            diasVencido: {
+              $divide: [
+                { $subtract: [new Date(), '$fechaRevision'] },
+                1000 * 60 * 60 * 24
+              ]
+            }
+          }
+        },
+        { $match: { diasVencido: { $gte: -30 } } }, // Próximas a vencer o ya vencidas
+        { $sort: { diasVencido: -1 } },
+        { $limit: 10 },
+        {
+          $project: {
+            nombre: 1,
+            fechaRevision: 1,
+            diasVencido: { $round: ['$diasVencido', 0] }
+          }
+        }
+      ]);
+
+      // Procesar datos
+      const general = generalStats[0] || {
+        totalSalvaguardas: 0,
+        salvaguardasImplementadas: 0,
+        salvaguardasPlanificadas: 0,
+        salvaguardasObsoletas: 0,
+        efectividadPromedio: 0,
+        costoTotalImplementacion: 0,
+        costoTotalMantenimiento: 0
+      };
+
+      // Calcular porcentaje de implementación
+      const porcentajeImplementacion = general.totalSalvaguardas > 0 
+        ? Math.round((general.salvaguardasImplementadas / general.totalSalvaguardas) * 100)
+        : 0;
+
+      // Distribución de costos
+      const costoTotal = general.costoTotalImplementacion + (general.costoTotalMantenimiento * 12);
+      const distribuccionCostos = distribucionCategoria.map(cat => ({
+        categoria: cat._id,
+        costo: cat.costoPromedio * cat.count,
+        porcentaje: costoTotal > 0 ? Math.round(((cat.costoPromedio * cat.count) / costoTotal) * 100) : 0
+      }));
+
+      return {
+        general: {
+          ...general,
+          porcentajeImplementacion,
+          efectividadPromedio: Math.round(general.efectividadPromedio || 0)
+        },
+        distribucion: {
+          porTipo: distribucionTipo,
+          porCategoria: distribucionCategoria,
+          porEstado: distribucionEstadoWithPercentage,
+          porResponsable: distribucionResponsable
+        },
+        efectividad: {
+          porRangoEficacia: rangoEficaciaWithPercentage,
+          mejoresPerformers,
+          necesitanMejora
+        },
+        costos: {
+          totalInversion: costoTotal,
+          costoPromedioImplementacion: general.totalSalvaguardas > 0 
+            ? Math.round(general.costoTotalImplementacion / general.totalSalvaguardas)
+            : 0,
+          costoPromedioMantenimiento: general.totalSalvaguardas > 0
+            ? Math.round(general.costoTotalMantenimiento / general.totalSalvaguardas)
+            : 0,
+          roiPromedio: 0, // TODO: Implementar cálculo de ROI
+          distribuccionCostos
+        },
+        timeline: {
+          implementacionesPorMes,
+          revisionesPendientes
+        },
+        metricas: {
+          tiempoPromedioImplementacion: 0, // TODO: Implementar si se tienen fechas
+          tasaExito: porcentajeImplementacion,
+          coberturaAmenazas: 0, // TODO: Implementar cálculo de cobertura
+          coberturaActivos: 0 // TODO: Implementar cálculo de cobertura
+        }
+      };
+    } catch (error) {
+      logger.error('Error obteniendo estadísticas de salvaguardas:', error);
+      throw error;
+    }
+  }
 }
 
 export const safeguardService = new SafeguardService();

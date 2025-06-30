@@ -102,5 +102,9 @@ router.post(
   authorize(RolUsuario.ADMIN, RolUsuario.OPERADOR, RolUsuario.AUDITOR),
   safeguardController.addKPI.bind(safeguardController)
 );
+router.get('/stats', 
+  cacheMiddleware(CACHE_TTL.safeguard_stats), 
+  safeguardController.getSafeguardStats.bind(safeguardController)
+);
 
 export default router;
