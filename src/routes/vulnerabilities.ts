@@ -1,30 +1,58 @@
+
+// ===========================
+// src/routes/vulnerabilities.ts - CORREGIDO
+// ===========================
 import { Router } from 'express';
 import { vulnerabilityController } from '../controllers/vulnerabilityController';
 import { authenticate, authorize } from '../middleware/auth';
 import { RolUsuario } from '../types';
+import { 
+  cacheMiddleware, 
+  cacheInvalidationMiddleware, 
+  CACHE_TTL 
+} from '../middleware/cache';
 
 const router = Router();
 
 // Todas las rutas requieren autenticación
 router.use(authenticate);
+router.use(cacheInvalidationMiddleware);
 
-// GET /api/v1/vulnerabilities - Obtener lista de vulnerabilidades
-router.get('/', vulnerabilityController.getVulnerabilities.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities - Obtener lista de vulnerabilidades (CACHÉ)
+router.get('/', 
+  cacheMiddleware(CACHE_TTL.vulnerabilities), 
+  vulnerabilityController.getVulnerabilities.bind(vulnerabilityController)
+);
 
-// GET /api/v1/vulnerabilities/stats - Estadísticas de vulnerabilidades
-router.get('/stats', vulnerabilityController.getVulnerabilityStats.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities/stats - Estadísticas de vulnerabilidades (CACHÉ OPTIMIZADO)
+router.get('/stats', 
+  cacheMiddleware(CACHE_TTL.vuln_stats), 
+  vulnerabilityController.getVulnerabilityStats.bind(vulnerabilityController)
+);
 
-// GET /api/v1/vulnerabilities/dashboard - Estadísticas del dashboard
-router.get('/dashboard', vulnerabilityController.getDashboardStats.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities/dashboard - Estadísticas del dashboard (CACHÉ)
+router.get('/dashboard', 
+  cacheMiddleware(CACHE_TTL.dashboard), 
+  vulnerabilityController.getDashboardStats.bind(vulnerabilityController)
+);
 
-// GET /api/v1/vulnerabilities/critical - Vulnerabilidades críticas
-router.get('/critical', vulnerabilityController.getCriticalVulnerabilities.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities/critical - Vulnerabilidades críticas (CACHÉ)
+router.get('/critical', 
+  cacheMiddleware(CACHE_TTL.vulnerabilities), 
+  vulnerabilityController.getCriticalVulnerabilities.bind(vulnerabilityController)
+);
 
-// GET /api/v1/vulnerabilities/categoria/:categoria - Vulnerabilidades por categoría
-router.get('/categoria/:categoria', vulnerabilityController.getVulnerabilitiesByCategoria.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities/categoria/:categoria - Vulnerabilidades por categoría (CACHÉ)
+router.get('/categoria/:categoria', 
+  cacheMiddleware(CACHE_TTL.vulnerabilities), 
+  vulnerabilityController.getVulnerabilitiesByCategoria.bind(vulnerabilityController)
+);
 
-// GET /api/v1/vulnerabilities/activo/:assetId - Vulnerabilidades para un activo
-router.get('/activo/:assetId', vulnerabilityController.getVulnerabilitiesForAsset.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities/activo/:assetId - Vulnerabilidades para un activo (CACHÉ)
+router.get('/activo/:assetId', 
+  cacheMiddleware(CACHE_TTL.vulnerabilities), 
+  vulnerabilityController.getVulnerabilitiesForAsset.bind(vulnerabilityController)
+);
 
 // POST /api/v1/vulnerabilities/bulk-action - Acciones en lote
 router.post(
@@ -40,8 +68,11 @@ router.post(
   vulnerabilityController.scanAssetVulnerabilities.bind(vulnerabilityController)
 );
 
-// GET /api/v1/vulnerabilities/:id - Obtener vulnerabilidad por ID
-router.get('/:id', vulnerabilityController.getVulnerabilityById.bind(vulnerabilityController));
+// GET /api/v1/vulnerabilities/:id - Obtener vulnerabilidad por ID (CACHÉ)
+router.get('/:id', 
+  cacheMiddleware(CACHE_TTL.vulnerabilities), 
+  vulnerabilityController.getVulnerabilityById.bind(vulnerabilityController)
+);
 
 // POST /api/v1/vulnerabilities - Crear nueva vulnerabilidad
 router.post(
